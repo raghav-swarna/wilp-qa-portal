@@ -1,0 +1,15 @@
+{
+  "name": "wilp-qa-portal-prod",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "seed": "node netlify/database/run-seed.mjs"
+  },
+  "dependencies": {
+    "@netlify/database": "^1.0.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.0"
+  }
+}
