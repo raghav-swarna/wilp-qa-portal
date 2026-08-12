@@ -10,13 +10,17 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import bcrypt from "bcryptjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+// Named _moduleDir (not __dirname) — Netlify's function bundler (esbuild) auto-injects its
+// own `__dirname` shim when bundling ESM for the Node runtime, which collides with an
+// explicit `const __dirname = ...` declaration and crashes the function with
+// "Identifier '__dirname' has already been declared".
+const _moduleDir = dirname(fileURLToPath(import.meta.url));
 
 function b(v) { return !!v; } // seed JSON uses 0/1 for booleans; Postgres BOOLEAN wants true/false
 function n(v) { return v === undefined ? null : v; }
 
 export async function seed(query) {
-  const raw = readFileSync(join(__dirname, "seed_data.json"), "utf8");
+  const raw = readFileSync(join(_moduleDir, "seed_data.json"), "utf8");
   const d = JSON.parse(raw);
 
   for (const p of d.programmes) {
