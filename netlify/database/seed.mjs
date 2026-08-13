@@ -5,23 +5,22 @@
 // second run. Every user's plaintext demo_password is bcrypt-hashed before insert; nothing
 // plaintext ever reaches the database. Takes `query` as an argument (works against PGlite in
 // local tests and against real Postgres via run-seed.mjs).
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import bcrypt from "bcryptjs";
 
-// Named _moduleDir (not __dirname) — Netlify's function bundler (esbuild) auto-injects its
-// own `__dirname` shim when bundling ESM for the Node runtime, which collides with an
-// explicit `const __dirname = ...` declaration and crashes the function with
-// "Identifier '__dirname' has already been declared".
-const _moduleDir = dirname(fileURLToPath(import.meta.url));
+// Loaded via createRequire (not fs.readFileSync + a resolved path) so Netlify's function
+// bundler (esbuild) inlines the JSON's contents directly into the compiled function bundle
+// at build time. A runtime file read fails in production because esbuild only bundles JS —
+// it does not copy sibling data files to the deployed function's directory, so a path like
+// `join(__dirname, "seed_data.json")` resolves to a file that was never actually deployed.
+const require = createRequire(import.meta.url);
+const seedData = require("./seed_data.json");
 
 function b(v) { return !!v; } // seed JSON uses 0/1 for booleans; Postgres BOOLEAN wants true/false
 function n(v) { return v === undefined ? null : v; }
 
 export async function seed(query) {
-  const raw = readFileSync(join(_moduleDir, "seed_data.json"), "utf8");
-  const d = JSON.parse(raw);
+  const d = seedData;
 
   for (const p of d.programmes) {
     await query("INSERT INTO programmes (id, name, code, status) VALUES ($1,$2,$3,$4)", [p.id, p.name, p.code, p.status]);
@@ -126,7 +125,6 @@ export async function seed(query) {
     );
   }
 
-  // Sync every SERIAL sequence to MAX(id)+1 since we inserted explicit ids above.
   const tables = ["users", "counselors", "programmes", "calls", "scorecard_categories", "scorecard_parameters", "ztp_rules", "kpi_definitions", "audits", "audit_scores", "audit_history", "error_records", "calibration_records", "disputes", "coaching_actions", "governance_events"];
   for (const t of tables) {
     await query(`SELECT setval(pg_get_serial_sequence('${t}', 'id'), COALESCE((SELECT MAX(id) FROM ${t}), 1))`);
