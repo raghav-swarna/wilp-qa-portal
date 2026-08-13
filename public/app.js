@@ -56,6 +56,8 @@
   }
 
   var QA_AND_ABOVE = ["ADMIN", "QA_ANALYST"];
+  var ADMIN_ONLY = ["ADMIN"];
+  var ALL_ROLES = ["ADMIN", "QA_ANALYST", "TEAM_LEAD", "COUNSELOR", "LEADERSHIP"];
   function hasRole(user, roles) { return !!user && roles.indexOf(user.role) !== -1; }
 
   // ---------------- Shell / router ----------------
@@ -69,6 +71,7 @@
       '<a href="#/" class="font-bold text-lg text-blue-800">WILP QA Portal</a>' +
       '<a href="#/audits" class="text-sm text-gray-600 hover:text-blue-700">Audits</a>' +
       (hasRole(user, QA_AND_ABOVE) ? '<a href="#/audits/new" class="text-sm text-gray-600 hover:text-blue-700">New Audit</a>' : "") +
+      (hasRole(user, ADMIN_ONLY) ? '<a href="#/users" class="text-sm text-gray-600 hover:text-blue-700">Users</a>' : "") +
       "</div>" +
       '<div class="flex items-center gap-3 text-sm">' +
       '<span class="text-gray-500">' + escapeHtml(user.name) + " · " + escapeHtml(user.role) + "</span>" +
@@ -93,6 +96,7 @@
     if (route === "audits-list") await mountAuditsList();
     else if (route === "audits-new") await mountNewAuditForm();
     else if (route.indexOf("audit-detail:") === 0) await mountAuditDetail(route.split(":")[1]);
+    else if (route === "users-list") await mountUsersPage();
   }
 
   async function router() {
@@ -116,6 +120,10 @@
       var id = path.split("/")[2];
       render(shellHtml('<div id="audit-detail-mount">Loading…</div>'));
       await afterRouteRender("audit-detail:" + id);
+    } else if (path === "/users") {
+      if (!hasRole(state.user, ADMIN_ONLY)) { render(shellHtml('<div class="card p-6">Only admins can manage users.</div>')); return; }
+      render(shellHtml('<div id="users-mount">Loading…</div>'));
+      await afterRouteRender("users-list");
     } else {
       render(shellHtml('<div class="card p-6">Not found.</div>'));
     }
@@ -378,6 +386,92 @@
     } catch (err) {
       mount.outerHTML = '<div class="card p-6 text-red-600">' + escapeHtml(err.message) + "</div>";
     }
+  }
+
+  // ---------------- Users (admin) ----------------
+  async function mountUsersPage() {
+    var mount = document.getElementById("users-mount");
+    try {
+      if (!state.meta) state.meta = await api("/api/meta");
+      var res = await api("/api/users");
+      var rows = res.rows;
+
+      var html =
+        '<div class="card p-5 mb-5">' +
+        '<h2 class="font-semibold mb-3">Add a user</h2>' +
+        '<form id="new-user-form" class="grid sm:grid-cols-2 gap-4">' +
+        '<div><label class="field-label">Name</label><input name="name" class="input" required /></div>' +
+        '<div><label class="field-label">Email</label><input name="email" type="email" class="input" required /></div>' +
+        '<div><label class="field-label">Initial password</label><input name="password" type="text" class="input" placeholder="Min. 8 characters" required /></div>' +
+        '<div><label class="field-label">Role</label><select name="role" id="new-user-role" class="input" required>' +
+        ALL_ROLES.map(function (r) { return '<option value="' + r + '">' + r + "</option>"; }).join("") +
+        "</select></div>" +
+        '<div><label class="field-label">Team (optional)</label><input name="team" class="input" /></div>' +
+        '<div id="new-user-counselor-wrap" class="hidden"><label class="field-label">Linked counselor</label><select name="counselorId" class="input"><option value="">Select…</option>' +
+        state.meta.counselors.map(function (c) { return '<option value="' + c.id + '">' + escapeHtml(c.name) + " (" + escapeHtml(c.employee_code) + ")</option>"; }).join("") +
+        "</select></div>" +
+        '<div id="new-user-error" class="text-sm text-red-600 hidden sm:col-span-2"></div>' +
+        '<div class="sm:col-span-2"><button type="submit" class="btn btn-primary">Create user</button></div>' +
+        "</form>" +
+        '<p class="text-xs text-gray-400 mt-3">The new user must change this password the first time they sign in. Only ADMIN accounts can access this page.</p>' +
+        "</div>" +
+        '<div class="card overflow-x-auto">' +
+        '<table class="w-full text-sm">' +
+        '<thead class="bg-gray-50 text-left text-xs text-gray-500 uppercase"><tr>' +
+        '<th class="p-3">Name</th><th class="p-3">Email</th><th class="p-3">Role</th><th class="p-3">Team</th><th class="p-3">Status</th><th class="p-3">Must change pw</th>' +
+        "</tr></thead><tbody>" +
+        rows.map(function (u) {
+          return (
+            "<tr class=\"border-t\">" +
+            '<td class="p-3">' + escapeHtml(u.name) + "</td>" +
+            '<td class="p-3">' + escapeHtml(u.email) + "</td>" +
+            '<td class="p-3">' + escapeHtml(u.role) + "</td>" +
+            '<td class="p-3">' + escapeHtml(u.team || "—") + "</td>" +
+            '<td class="p-3">' + (u.active ? '<span class="badge bg-green-100 text-green-800">Active</span>' : '<span class="badge bg-gray-100 text-gray-600">Inactive</span>') + "</td>" +
+            '<td class="p-3">' + (u.must_change_password ? "Yes" : "No") + "</td>" +
+            "</tr>"
+          );
+        }).join("") +
+        "</tbody></table></div>";
+
+      mount.outerHTML = html;
+
+      var roleSelect = document.getElementById("new-user-role");
+      var counselorWrap = document.getElementById("new-user-counselor-wrap");
+      function toggleCounselorField() {
+        if (roleSelect.value === "COUNSELOR") counselorWrap.classList.remove("hidden");
+        else counselorWrap.classList.add("hidden");
+      }
+      toggleCounselorField();
+      roleSelect.addEventListener("change", toggleCounselorField);
+
+      var form = document.getElementById("new-user-form");
+      form.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        var fd = new FormData(form);
+        var errBox = document.getElementById("new-user-error");
+        errBox.classList.add("hidden");
+        var payload = {
+          name: fd.get("name"), email: fd.get("email"), password: fd.get("password"),
+          role: fd.get("role"), team: fd.get("team") || null,
+          counselorId: fd.get("counselorId") ? Number(fd.get("counselorId")) : null,
+        };
+        try {
+          await api("/api/users", { method: "POST", body: payload });
+          toast("User created.");
+          await mountUsersPageRefresh();
+        } catch (err) {
+          errBox.textContent = err.message;
+          errBox.classList.remove("hidden");
+        }
+      });
+    } catch (err) {
+      mount.outerHTML = '<div class="card p-6 text-red-600">' + escapeHtml(err.message) + "</div>";
+    }
+  }
+  async function mountUsersPageRefresh() {
+    render(shellHtml('<div id="users-mount">Loading…</div>'));
+    await mountUsersPage();
   }
 
   // ---------------- Boot ----------------
