@@ -5,16 +5,15 @@
 // second run. Every user's plaintext demo_password is bcrypt-hashed before insert; nothing
 // plaintext ever reaches the database. Takes `query` as an argument (works against PGlite in
 // local tests and against real Postgres via run-seed.mjs).
-import { createRequire } from "node:module";
 import bcrypt from "bcryptjs";
-
-// Loaded via createRequire (not fs.readFileSync + a resolved path) so Netlify's function
-// bundler (esbuild) inlines the JSON's contents directly into the compiled function bundle
-// at build time. A runtime file read fails in production because esbuild only bundles JS —
-// it does not copy sibling data files to the deployed function's directory, so a path like
-// `join(__dirname, "seed_data.json")` resolves to a file that was never actually deployed.
-const require = createRequire(import.meta.url);
-const seedData = require("./seed_data.json");
+// A plain static `import ... from "./x.json"` is the one form esbuild is guaranteed to
+// statically analyze and inline into the compiled function bundle at build time. Both
+// fs.readFileSync(a resolved path) and createRequire()+require() were tried first and both
+// failed in production — esbuild doesn't follow either of those to know it needs to copy or
+// inline the JSON, so the deployed function bundle never actually contained the data. The
+// `with { type: "json" }` attribute is required for this same file to also run correctly
+// under plain Node (e.g. local testing, run-seed.mjs) — esbuild accepts and honors it too.
+import seedData from "./seed_data.json" with { type: "json" };
 
 function b(v) { return !!v; } // seed JSON uses 0/1 for booleans; Postgres BOOLEAN wants true/false
 function n(v) { return v === undefined ? null : v; }
